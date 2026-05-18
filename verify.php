@@ -106,7 +106,7 @@ if ($protocol) {
 
         <?php if (!empty($protocol['document_hash'])): ?>
             <div class="data-list" style="background: rgba(59, 130, 246, 0.05); border-color: rgba(59, 130, 246, 0.2);">
-                <div style="font-size: 11px; font-weight: 800; color: #3b82f6; text-transform: uppercase; margin-bottom: 10px; text-align: center;">Крип��ографічні дані КЕП</div>
+                <div style="font-size: 11px; font-weight: 800; color: #3b82f6; text-transform: uppercase; margin-bottom: 10px; text-align: center;">Криптографічні дані КЕП</div>
                 
                 <div class="data-row" style="flex-direction: column; align-items: flex-start;">
                     <span class="data-label" style="margin-bottom: 4px;">Слід Голови:</span>
