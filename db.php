@@ -2,21 +2,43 @@
 /**
  * DB.PHP — Головний диспетчер системи (Bootstrap)
  * Тут ініціалізуються всі налаштування безпеки та підключення.
+ * ВЕРСІЯ: 2.0 (Security Hardened)
  */
 
 // ==========================================
 // 0. БАЗОВІ НАЛАШТУВАННЯ СИСТЕМИ (Security & Time)
 // ==========================================
-date_default_timezone_set('Europe/Kyiv'); // Критично для збігу часу в логах і БД
-ini_set('display_errors', 0);             // Вимикаємо вивід помилок на екран (захист від витоку шляхів)
-ini_set('log_errors', 1);                 // Вмикаємо логування у файл
-error_reporting(E_ALL);                   // Логуємо всі помилки для аудиту
+date_default_timezone_set('Europe/Kyiv');
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+ini_set('error_log', dirname(__FILE__) . '/logs/error.log');
+error_reporting(E_ALL);
+
+// 🛡️ БЕЗПЕКА: Обов'язковий HTTPS в production
+if (PHP_SAPI !== 'cli' && !in_array($_SERVER['REQUEST_METHOD'] ?? '', ['OPTIONS'])) {
+    if (getenv('ENVIRONMENT') === 'production') {
+        if (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') {
+            header('Location: https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'], true, 301);
+            exit;
+        }
+    }
+}
+
+// 🛡️ БЕЗПЕКА: Content Security Policy
+if (PHP_SAPI !== 'cli') {
+    define('CSP_NONCE', bin2hex(random_bytes(16)));
+    header("Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-" . CSP_NONCE . "' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://fonts.googleapis.com; style-src 'self' 'nonce-" . CSP_NONCE . "' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self' https://api.qrserver.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self';");
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+    header('X-XSS-Protection: 1; mode=block');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+}
 
 // ==========================================
-// 1. АВТОЗАВАНТАЖУВАЧ КЛАСІВ (Має бути першим!)
+// 1. АВТОЗАВАНТАЖУВАЧ КЛАСІВ
 // ==========================================
 spl_autoload_register(function ($class) {
-    // Конвертуємо простір імен (наприклад Core\DB) у шлях до файлу (Core/DB.php)
     $path = __DIR__ . '/' . str_replace('\\', '/', $class) . '.php';
     if (file_exists($path)) {
         require_once $path;
@@ -24,35 +46,36 @@ spl_autoload_register(function ($class) {
 });
 
 // ==========================================
-// 2. ЗАВАНТАЖЕННЯ КОНФІГУРАЦІЇ ТА КОНСТАНТ
+// 2. ЗАВАНТАЖЕННЯ КОНФІГУРАЦІЇ
 // ==========================================
-\Core\Config::load();
+if (class_exists('\\Core\\Config')) {
+    \Core\Config::load();
+}
 
-// 🛡️ КОНФІГУРАЦІЯ БЕЗПЕКИ АВТОРИЗАЦІЇ ТА RATE LIMITING
-define('AUTH_TRUST_PROXIES', false);  // true - ТІЛЬКИ якщо сервер за Nginx Proxy/Cloudflare
-define('AUTH_MAX_ATTEMPTS_PHONE', 5); // Суворий ліміт спроб для одного номера
-define('AUTH_MAX_ATTEMPTS_IP', 20);   // М'якший ліміт для IP-адреси (захист NAT-мереж)
-define('AUTH_LOCKOUT_MINUTES', 15);   // Час блокування при переборі
-define('AUTH_LOG_RETENTION_DAYS', 7); // Скільки днів зберігати аудит-логи
+// 🛡️ КОНФІГУРАЦІЯ БЕЗПЕКИ
+define('AUTH_TRUST_PROXIES', getenv('AUTH_TRUST_PROXIES') === 'true');
+define('AUTH_MAX_ATTEMPTS_PHONE', 5);
+define('AUTH_MAX_ATTEMPTS_IP', 20);
+define('AUTH_LOCKOUT_MINUTES', 15);
+define('AUTH_LOG_RETENTION_DAYS', 7);
+define('RATE_LIMIT_ENABLED', true);
+define('RATE_LIMIT_DEFAULT', 100);
+define('RATE_LIMIT_WINDOW', 3600);
 
 // ==========================================
 // 3. БЕЗПЕЧНІ СЕСІЇ (Maximum Security)
 // ==========================================
 if (session_status() === PHP_SESSION_NONE) {
-
-    $lifetime = 60 * 60 * 24 * 30; 
-    ini_set('session.gc_maxlifetime', $lifetime); 
-    ini_set('session.cookie_lifetime', $lifetime); 
-
-    ini_set('session.cookie_httponly', 1);        // JS не має доступу до кук сесії
-    ini_set('session.use_only_cookies', 1);       // Забороняє передавати ID сесії в URL
-    ini_set('session.use_strict_mode', 1);        // Захист від фіксації сесії (Session Fixation)
-    ini_set('session.cookie_samesite', 'Strict'); // Захист від міжсайтових запитів (CSRF)
-
-    // Автоматично вмикаємо Secure, якщо сайт працює через HTTPS
-    if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
-        ini_set('session.cookie_secure', 1);
-    }
+    $lifetime = 60 * 60 * 24 * 30;
+    ini_set('session.gc_maxlifetime', $lifetime);
+    ini_set('session.cookie_lifetime', $lifetime);
+    
+    // 🛡️ МАКСИМАЛЬНА БЕЗПЕКА
+    ini_set('session.cookie_httponly', 1);
+    ini_set('session.use_only_cookies', 1);
+    ini_set('session.use_strict_mode', 1);
+    ini_set('session.cookie_samesite', 'Strict');
+    ini_set('session.cookie_secure', 1); // ЗАВЖДИ у production
     
     session_start();
 }
@@ -64,8 +87,7 @@ if (empty($_SESSION['csrf_token'])) {
     try {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
     } catch (\Exception $e) {
-        // Fallback на випадок, якщо random_bytes недоступний у старих системах
-        $_SESSION['csrf_token'] = bin2hex(openssl_random_pseudo_bytes(32)); 
+        $_SESSION['csrf_token'] = bin2hex(openssl_random_pseudo_bytes(32));
     }
 }
 
@@ -73,33 +95,22 @@ if (empty($_SESSION['csrf_token'])) {
 // 5. ІНІЦІАЛІЗАЦІЯ БАЗИ ДАНИХ
 // ==========================================
 try {
-    // Отримуємо об'єкт підключення (Автозавантажувач сам знайде клас Core\DB)
     $pdo = \Core\DB::connect();
-    
-    // Примусово ставимо кодування для уникнення "кракозябр" у старих версіях PHP/MySQL
     $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
-    
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (\Exception $e) {
-    // Записуємо реальну помилку в лог сервера (щоб хакери не бачили структуру БД)
-    error_log("Критична помилка БД: " . $e->getMessage());
-    
-    // Віддаємо статус 503, щоб пошукові роботи не індексували цю сторінку як робочу
+    error_log("DB Error: " . $e->getMessage());
     http_response_code(503);
     die("На сайті ведуться технічні роботи. Спробуйте пізніше.");
 }
 
 // ==========================================
-// 6. ПІДТРИМКА СТАРИХ ФУНКЦІЙ (Backward Compatibility)
+// 6. RATE LIMITING (Глобальне)
 // ==========================================
-// Залишаємо для сумісності з модулями, де ще використовуються старі назви функцій
-if (!function_exists('encryptData')) {
-    function encryptData($data) {
-        return class_exists('\Core\Security') ? \Core\Security::encrypt($data) : $data;
-    }
-}
-
-if (!function_exists('decryptData')) {
-    function decryptData($data) {
-        return class_exists('\Core\Security') ? \Core\Security::decrypt($data) : $data;
+if (RATE_LIMIT_ENABLED && php_sapi_name() !== 'cli') {
+    $rate_limiter = new \Core\RateLimiter($_SESSION['user_id'] ?? 0, $_SERVER['REMOTE_ADDR'] ?? '');
+    if (!$rate_limiter->isAllowed(RATE_LIMIT_DEFAULT, RATE_LIMIT_WINDOW)) {
+        http_response_code(429);
+        die(json_encode(['success' => false, 'msg' => 'Забагато запитів. Спробуйте пізніше.']));
     }
 }

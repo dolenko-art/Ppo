@@ -30,7 +30,7 @@ foreach ($raw_leaders as $l) {
     $r = $l['role'] === 'admin' ? 'head' : $l['role'];
     if (isset($role_counts[$r])) $role_counts[$r]++;
     
-    $name = class_exists('\Core\Security') ? (\Core\Security::decrypt($l['full_name']) ?: $l['full_name']) : $l['full_name'];
+    $name = class_exists('\Core\Security') ? (\Core\Security::decrypt($l['full_name']) ?: 'Невідомо') : $l['full_name'];
     $assigned_time = !empty($l['role_assigned_at']) ? strtotime($l['role_assigned_at']) : strtotime($l['joined_at']); 
     
     $next_election_time = strtotime("+$election_period_years years", $assigned_time);
@@ -39,9 +39,9 @@ foreach ($raw_leaders as $l) {
     $role_display_name = $role_names[$r] . ($role_counts[$r] > 1 ? ' #' . $role_counts[$r] : '');
 
     $leaders[] = [
-        'role_name'     => $role_display_name,
+        'role_name'     => htmlspecialchars($role_display_name, ENT_QUOTES, 'UTF-8'),
         'icon'          => $role_icons[$r],
-        'name'          => $name,
+        'name'          => htmlspecialchars($name, ENT_QUOTES, 'UTF-8'),
         'elected_date'  => date('d.m.Y', $assigned_time),
         'next_election' => date('d.m.Y', $next_election_time),
         'days_left'     => $days_left,
@@ -54,7 +54,7 @@ foreach ($raw_leaders as $l) {
 foreach (['head', 'auditor', 'manager'] as $r) {
     if ($role_counts[$r] === 0) {
         $leaders[] = [
-            'role_name'   => $role_names[$r],
+            'role_name'   => htmlspecialchars($role_names[$r], ENT_QUOTES, 'UTF-8'),
             'icon'        => $role_icons[$r],
             'name'        => 'Не обрано',
             'is_empty'    => true,
@@ -72,13 +72,20 @@ $limit = 15;
 $p_m = max(1, (int)($_GET['p_m'] ?? 1));
 $offset = ($p_m - 1) * $limit;
 $total_members_count = \Core\DB::fetchColumn("SELECT COUNT(*) FROM users WHERE ppo_id = ? AND status IN ('member', 'admin')", [$ppo_id]) ?: 1;
-$raw_members = \Core\DB::fetchAll("SELECT id, full_name, role, joined_at FROM users WHERE ppo_id = ? AND status IN ('member', 'admin') ORDER BY joined_at ASC LIMIT $limit OFFSET $offset", [$ppo_id]) ?: [];
+
+// 🛡️ FIX: Використовуємо LIMIT/OFFSET з параметрами
+$raw_members = \Core\DB::fetchAll(
+    "SELECT id, full_name, role, joined_at FROM users WHERE ppo_id = ? AND status IN ('member', 'admin') ORDER BY joined_at ASC LIMIT ? OFFSET ?",
+    [$ppo_id, $limit, $offset]
+) ?: [];
+
 $members_list = [];
 foreach ($raw_members as $m) {
+    $dec_name = class_exists('\Core\Security') ? (\Core\Security::decrypt($m['full_name']) ?: 'Невідомо') : $m['full_name'];
     $members_list[] = [
-        'id'     => $m['id'],
-        'name'   => class_exists('\Core\Security') ? (\Core\Security::decrypt($m['full_name']) ?: $m['full_name']) : $m['full_name'],
-        'role'   => $m['role'], 
+        'id'     => (int)$m['id'],
+        'name'   => htmlspecialchars($dec_name, ENT_QUOTES, 'UTF-8'),
+        'role'   => htmlspecialchars($m['role'] ?? '', ENT_QUOTES, 'UTF-8'),
         'joined' => $m['joined_at']
     ];
 }
@@ -102,26 +109,25 @@ $top_activists_raw = \Core\DB::fetchAll("
 
 $top_activists = [];
 foreach($top_activists_raw as $act) {
-    $a_name = class_exists('\Core\Security') ? (\Core\Security::decrypt($act['full_name']) ?: $act['full_name']) : $act['full_name'];
+    $a_name = class_exists('\Core\Security') ? (\Core\Security::decrypt($act['full_name']) ?: 'Невідомо') : $act['full_name'];
     $top_activists[] = [
-        'name' => $a_name,
-        'score' => $act['activity_score']
+        'name' => htmlspecialchars($a_name, ENT_QUOTES, 'UTF-8'),
+        'score' => (int)$act['activity_score']
     ];
 }
 
-// --- ВКЛАДКА 4: СТАТИСТИКА ---
+// --- ВКЛАДКА 3: СТАТИСТИКА ---
 $stats = [
-    'polls'  => \Core\DB::fetchColumn("SELECT COUNT(*) FROM polls WHERE ppo_id = ?", [$ppo_id]),
-    'noms'   => \Core\DB::fetchColumn("SELECT COUNT(*) FROM nominations WHERE ppo_id = ?", [$ppo_id]),
-    'pets'   => \Core\DB::fetchColumn("SELECT COUNT(*) FROM petitions WHERE ppo_id = ?", [$ppo_id]),
-    'events' => \Core\DB::fetchColumn("SELECT COUNT(*) FROM events WHERE ppo_id = ?", [$ppo_id])
+    'polls'  => (int)\Core\DB::fetchColumn("SELECT COUNT(*) FROM polls WHERE ppo_id = ?", [$ppo_id]),
+    'noms'   => (int)\Core\DB::fetchColumn("SELECT COUNT(*) FROM nominations WHERE ppo_id = ?", [$ppo_id]),
+    'pets'   => (int)\Core\DB::fetchColumn("SELECT COUNT(*) FROM petitions WHERE ppo_id = ?", [$ppo_id]),
+    'events' => (int)\Core\DB::fetchColumn("SELECT COUNT(*) FROM events WHERE ppo_id = ?", [$ppo_id])
 ];
 
-$all_polls = \Core\DB::fetchAll("
-    SELECT id, end_date, 
-           (SELECT COUNT(*) FROM votes WHERE poll_id = polls.id) as current_votes 
-    FROM polls WHERE ppo_id = ?
-", [$ppo_id]) ?: [];
+$all_polls = \Core\DB::fetchAll(
+    "SELECT id, end_date, (SELECT COUNT(*) FROM votes WHERE poll_id = polls.id) as current_votes FROM polls WHERE ppo_id = ?",
+    [$ppo_id]
+) ?: [];
 
 $total_percentages = 0;
 $valid_polls_count = 0;
