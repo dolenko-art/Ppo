@@ -1,16 +1,19 @@
 <?php
-// 1. Підключаємо ядро (воно надійно запустить сесію з усіма налаштуваннями безпеки)
+/**
+ * logout.php - Вихід користувача
+ * ВЕРСІЯ: 2.0 (Security Hardened)
+ */
+
 require_once 'db.php';
 
-// 2. Очищаємо всі змінні сесії (видаляємо user_id, ppo_id тощо)
-session_unset();
+if (\Core\Auth::loggedIn()) {
+    $user_id = \Core\Auth::userId();
+    error_log("User {$user_id} logged out at " . date('Y-m-d H:i:s') . " from IP " . ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'));
+    
+    \Core\Auth::logout();
+}
 
-// 3. Генеруємо новий ID сесії (Броня від атак "фіксації сесії")
-session_regenerate_id(true);
-
-// 4. Записуємо повідомлення у вже очищену і захищену сесію
-$_SESSION['toast_msg'] = "✅ Ви успішно вийшли з системи.";
-
-// 5. Перенаправляємо на сторінку логіну
+// 🔥 Redirect to login with message
+$_SESSION['toast_msg'] = '✅ Ви вийшли з системи. До побачення!';
 header("Location: login.php");
 exit;
